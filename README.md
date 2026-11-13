@@ -18,4 +18,4 @@ git commit -m "Kit aktualisiert"
 git push
 ```
 
-Das Skript fragt nach dem Passwort. Mit einem neuen Passwort verfallen gespeicherte Anmeldungen.
+Das Skript fragt nach dem Passwort. Bleibt das Passwort gleich, bleiben gespeicherte Anmeldungen («angemeldet bleiben») gültig; mit einem neuen Passwort verfallen sie.

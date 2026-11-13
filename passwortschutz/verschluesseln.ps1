@@ -27,11 +27,26 @@ if ($Passwort.Length -lt 6) { throw 'Bitte mindestens 6 Zeichen verwenden.' }
 $utf8 = New-Object System.Text.UTF8Encoding($false)
 $iter = 600000
 $rng  = [Security.Cryptography.RandomNumberGenerator]::Create()
-$salt = New-Object byte[] 16; $rng.GetBytes($salt)
+$ableiten = { param($salz) (New-Object Security.Cryptography.Rfc2898DeriveBytes($utf8.GetBytes($Passwort), $salz, $iter, [Security.Cryptography.HashAlgorithmName]::SHA256)).GetBytes(64) }
+
+# Gleiches Passwort wie bisher? Dann Salt behalten, damit "angemeldet bleiben" gueltig bleibt.
+$salt = $null
+$zielPfad = [IO.Path]::GetFullPath($Ziel)
+if (Test-Path $zielPfad) {
+  $alt = [IO.File]::ReadAllText($zielPfad, $utf8)
+  if ($alt -match '"salt":"([^"]+)","iv":"([^"]+)","ct":"([^"]+)","mac":"([^"]+)"') {
+    $aSalt = [Convert]::FromBase64String($Matches[1]); $aIv = [Convert]::FromBase64String($Matches[2])
+    $aCt = [Convert]::FromBase64String($Matches[3]); $aMac = $Matches[4]
+    $aBits = & $ableiten $aSalt
+    $h = New-Object Security.Cryptography.HMACSHA256(,[byte[]]$aBits[32..63])
+    if ([Convert]::ToBase64String($h.ComputeHash([byte[]]($aIv + $aCt))) -eq $aMac) { $salt = $aSalt; Write-Host 'Gleiches Passwort: gespeicherte Anmeldungen bleiben gueltig.' }
+    else { Write-Host 'Neues Passwort: gespeicherte Anmeldungen verfallen.' }
+  }
+}
+if (-not $salt) { $salt = New-Object byte[] 16; $rng.GetBytes($salt) }
 
 # Schluessel ableiten: 32 Byte fuer AES-256, 32 Byte fuer HMAC-SHA256
-$kdf  = New-Object Security.Cryptography.Rfc2898DeriveBytes($utf8.GetBytes($Passwort), $salt, $iter, [Security.Cryptography.HashAlgorithmName]::SHA256)
-$bits = $kdf.GetBytes(64)
+$bits = & $ableiten $salt
 $encKey = $bits[0..31]; $macKey = $bits[32..63]
 
 $aes = [Security.Cryptography.Aes]::Create()
@@ -44,6 +59,5 @@ $mac = $hmac.ComputeHash([byte[]]($aes.IV + $ct))
 $payload = '{"iter":' + $iter + ',"salt":"' + [Convert]::ToBase64String($salt) + '","iv":"' + [Convert]::ToBase64String($aes.IV) +
            '","ct":"' + [Convert]::ToBase64String($ct) + '","mac":"' + [Convert]::ToBase64String($mac) + '"}'
 $vorlage = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'passwort-seite.html'), $utf8)
-$zielPfad = [IO.Path]::GetFullPath($Ziel)
 [IO.File]::WriteAllText($zielPfad, $vorlage.Replace('__PAYLOAD__', $payload), $utf8)
 Write-Host "Fertig: $zielPfad"

@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Kommunikationskit Grundlagenberichte</title>
+<style>
+  :root { --accent:#f59300; --accent-strong:#bd5200; --ink:#2d2e37; --muted:#5f6170; --line:#e3e4ea; --paper:#faf9f6; --white:#fff; --err:#b3261e; }
+  * { box-sizing:border-box; }
+  body { margin:0; min-height:100vh; display:grid; place-items:center; padding:16px; background:var(--paper); color:var(--ink);
+         font:16px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
+  .box { width:100%; max-width:380px; background:var(--white); border:1px solid var(--line); border-top:4px solid var(--accent); border-radius:10px; padding:28px 24px; }
+  h1 { font-size:1.2rem; margin:0 0 4px; }
+  p { margin:0 0 20px; color:var(--muted); font-size:.92rem; }
+  label { display:block; font-weight:600; font-size:.9rem; margin-bottom:6px; }
+  input[type=password] { width:100%; padding:10px 12px; font:inherit; border:1px solid var(--line); border-radius:6px; }
+  input[type=password]:focus { outline:2px solid var(--accent); outline-offset:1px; border-color:transparent; }
+  .remember { display:flex; gap:8px; align-items:center; margin:12px 0 18px; font-size:.88rem; color:var(--muted); font-weight:400; }
+  button { width:100%; padding:11px; font:inherit; font-weight:600; color:var(--white); background:var(--accent-strong); border:0; border-radius:6px; cursor:pointer; }
+  button:hover { background:#9e4400; }
+  button:disabled { opacity:.6; cursor:wait; }
+  .err { color:var(--err); font-size:.88rem; min-height:1.3em; margin:10px 0 0; }
+</style>
+</head>
+<body>
+<form class="box" id="f" autocomplete="off">
+  <h1>Kommunikationskit Grundlagenberichte</h1>
+  <p>Geschützter Bereich · Accès protégé · Accesso protetto</p>
+  <label for="pw">Passwort · Mot de passe · Password</label>
+  <input type="password" id="pw" required autofocus>
+  <label class="remember"><input type="checkbox" id="rem"> Auf diesem Gerät angemeldet bleiben</label>
+  <button type="submit" id="btn">Öffnen</button>
+  <p class="err" id="err" role="alert"></p>
+</form>
+<script>
+(() => {
+  const D = __PAYLOAD__;
+  const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+  const salt = b64(D.salt), iv = b64(D.iv), ct = b64(D.ct), mac = b64(D.mac);
+  const KEY = 'kit-schluessel-' + D.salt;
+  const store = { get(){ try { return localStorage.getItem(KEY); } catch { return null; } },
+                  set(v){ try { localStorage.setItem(KEY, v); } catch {} },
+                  del(){ try { localStorage.removeItem(KEY); } catch {} } };
+
+  async function derive(pw) {
+    const base = await crypto.subtle.importKey('raw', new TextEncoder().encode(pw), 'PBKDF2', false, ['deriveBits']);
+    return new Uint8Array(await crypto.subtle.deriveBits({ name:'PBKDF2', salt, iterations:D.iter, hash:'SHA-256' }, base, 512));
+  }
+  // Entschlüsselt und prüft; gibt den HTML-Text zurück oder null bei falschem Schlüssel
+  async function decrypt(bits) {
+    const macKey = await crypto.subtle.importKey('raw', bits.slice(32), { name:'HMAC', hash:'SHA-256' }, false, ['verify']);
+    const data = new Uint8Array(iv.length + ct.length); data.set(iv); data.set(ct, iv.length);
+    if (!await crypto.subtle.verify('HMAC', macKey, mac, data)) return null;
+    const encKey = await crypto.subtle.importKey('raw', bits.slice(0, 32), 'AES-CBC', false, ['decrypt']);
+    return new TextDecoder().decode(await crypto.subtle.decrypt({ name:'AES-CBC', iv }, encKey, ct));
+  }
+  const show = html => { document.open(); document.write(html); document.close(); };
+  const toB64 = u => btoa(String.fromCharCode(...u));
+
+  const saved = store.get();
+  if (saved) decrypt(b64(saved)).then(h => h ? show(h) : store.del()).catch(() => store.del());
+
+  const f = document.getElementById('f'), btn = document.getElementById('btn'), err = document.getElementById('err');
+  f.addEventListener('submit', async e => {
+    e.preventDefault();
+    err.textContent = ''; btn.disabled = true;
+    try {
+      const bits = await derive(document.getElementById('pw').value);
+      const html = await decrypt(bits);
+      if (html) {
+        // "angemeldet bleiben": nur der Schlüssel wird gespeichert, nie das Passwort
+        if (document.getElementById('rem').checked) store.set(toB64(bits));
+        show(html);
+        return;
+      }
+      err.textContent = 'Falsches Passwort · Mot de passe incorrect · Password errata';
+    } catch (x) {
+      err.textContent = 'Fehler beim Öffnen. Bitte einen aktuellen Browser verwenden.';
+    }
+    btn.disabled = false;
+  });
+})();
+</script>
+</body>
+</html>

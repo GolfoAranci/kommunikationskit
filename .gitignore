@@ -4,3 +4,6 @@ index-test.html
 
 # Lokale Claude-Einstellungen
 .claude/
+
+# Interne Prüfberichte: nur lokal
+pruefberichte/
